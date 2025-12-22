@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import AuthStatus from "../components/AuthStatus";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,6 +28,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        {/* Simple site header: keep auth controls visible on every page */}
+        <header style={{ display: "flex", justifyContent: "flex-end", padding: 12 }}>
+          <AuthStatus />
+        </header>
+
         {children}
       </body>
     </html>
