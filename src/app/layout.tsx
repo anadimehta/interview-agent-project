@@ -24,16 +24,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {/* Simple site header: header reserved for page-level controls (Nav will show auth) */}
-        <header style={{ display: "flex", justifyContent: "flex-end", padding: 12 }}>
-          {/* AuthStatus intentionally removed from the top-right; Nav will render it near the navbar */}
-        </header>
-
-        {children}
-      </body>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>{children}</body>
     </html>
   );
 }

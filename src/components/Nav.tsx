@@ -33,7 +33,7 @@ export default function Nav() {
   }, []);
 
   return (
-    <nav className="fixed w-full z-50 border-b border-white/5 glass-card py-4">
+    <nav className="fixed top-0 left-0 w-full z-50 border-b border-white/5 glass-card py-4">
       <div className="max-w-7xl mx-auto px-6 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold">C</div>

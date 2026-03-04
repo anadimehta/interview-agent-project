@@ -48,3 +48,160 @@ body { font-family: 'Inter', sans-serif; background-color: var(--bg-deep); color
 @keyframes wave { 0%,100% { height: 10px; } 50% { height: 30px; } }
 
 .video-container:hover .play-overlay { background: rgba(0,0,0,0.2); }
+
+.hero-orb-stage {
+  position: relative;
+  width: min(380px, 78vw);
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+  perspective: 900px;
+}
+
+.hero-orb-glow {
+  position: absolute;
+  inset: 12%;
+  border-radius: 999px;
+  background: radial-gradient(circle at 40% 40%, rgba(96,165,250,0.55), rgba(59,130,246,0.05) 70%);
+  filter: blur(24px);
+  animation: heroOrbGlow 4.5s ease-in-out infinite;
+}
+
+.hero-orb-core {
+  position: absolute;
+  width: 54%;
+  height: 54%;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, rgba(224,242,254,0.95), rgba(59,130,246,0.7) 40%, rgba(30,64,175,0.55) 70%, rgba(2,6,23,0.2) 100%);
+  box-shadow: inset -20px -20px 30px rgba(15,23,42,0.5), 0 0 42px rgba(59,130,246,0.45);
+  animation: heroOrbCore 7s ease-in-out infinite;
+}
+
+.hero-orb-ring {
+  position: absolute;
+  border-radius: 999px;
+  border: 1px solid rgba(147,197,253,0.45);
+}
+
+.hero-orb-ring-a {
+  width: 80%;
+  height: 52%;
+  transform: rotateX(73deg) rotateZ(8deg);
+  animation: heroOrbRingA 8s linear infinite;
+}
+
+.hero-orb-ring-b {
+  width: 62%;
+  height: 84%;
+  transform: rotateY(68deg) rotateZ(24deg);
+  border-color: rgba(196,181,253,0.42);
+  animation: heroOrbRingB 9s linear infinite reverse;
+}
+
+.hero-orb-particle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(191,219,254,0.95);
+  box-shadow: 0 0 12px rgba(125,211,252,0.8);
+}
+
+.hero-orb-particle-1 { animation: heroOrbParticle1 7.8s linear infinite; }
+.hero-orb-particle-2 { animation: heroOrbParticle2 6.5s linear infinite; }
+.hero-orb-particle-3 { animation: heroOrbParticle3 8.7s linear infinite; }
+.hero-orb-particle-4 { animation: heroOrbParticle4 7.1s linear infinite; }
+
+#landing-page {
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.depth-dot-field {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.depth-dot {
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.9);
+  box-shadow: 0 0 10px rgba(255,255,255,0.45);
+  opacity: 0;
+  animation-name: depthDotFloat;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform, opacity, filter;
+}
+
+@keyframes depthDotFloat {
+  0% {
+    transform: translate3d(0, 0, 0) scale(var(--dot-start-scale, 0.2));
+    filter: blur(var(--dot-start-blur, 1px)) brightness(0.8);
+    opacity: 0;
+  }
+  18% {
+    opacity: calc(var(--dot-opacity, 0.6) * 0.45);
+  }
+  62% {
+    opacity: var(--dot-opacity, 0.6);
+  }
+  100% {
+    transform: translate3d(var(--drift-x, 0px), var(--drift-y, -160px), 0) scale(var(--dot-end-scale, 1.8));
+    filter: blur(var(--dot-end-blur, 0.6px)) brightness(1.2);
+    opacity: 0;
+  }
+}
+
+@keyframes heroOrbGlow {
+  0%, 100% { transform: scale(0.92); opacity: 0.6; }
+  50% { transform: scale(1.06); opacity: 0.95; }
+}
+
+@keyframes heroOrbCore {
+  0%, 100% { transform: translateY(4px) rotate(0deg) scale(0.96); }
+  50% { transform: translateY(-8px) rotate(180deg) scale(1.04); }
+}
+
+@keyframes heroOrbRingA {
+  from { transform: rotateX(73deg) rotateZ(0deg); }
+  to { transform: rotateX(73deg) rotateZ(360deg); }
+}
+
+@keyframes heroOrbRingB {
+  from { transform: rotateY(68deg) rotateZ(0deg); }
+  to { transform: rotateY(68deg) rotateZ(360deg); }
+}
+
+@keyframes heroOrbParticle1 {
+  0% { transform: translate3d(-120px, -14px, 0) scale(0.8); opacity: 0; }
+  10%, 90% { opacity: 1; }
+  100% { transform: translate3d(120px, -18px, 0) scale(1.25); opacity: 0; }
+}
+
+@keyframes heroOrbParticle2 {
+  0% { transform: translate3d(95px, -100px, 0) scale(0.65); opacity: 0; }
+  15%, 88% { opacity: 0.95; }
+  100% { transform: translate3d(-95px, 96px, 0) scale(1.15); opacity: 0; }
+}
+
+@keyframes heroOrbParticle3 {
+  0% { transform: translate3d(-84px, 100px, 0) scale(0.7); opacity: 0; }
+  20%, 85% { opacity: 0.95; }
+  100% { transform: translate3d(84px, -102px, 0) scale(1.2); opacity: 0; }
+}
+
+@keyframes heroOrbParticle4 {
+  0% { transform: translate3d(0, 124px, 0) scale(0.75); opacity: 0; }
+  18%, 90% { opacity: 0.9; }
+  100% { transform: translate3d(0, -128px, 0) scale(1.3); opacity: 0; }
+}
+
+.login-page-courier,
+.login-page-courier * {
+  font-family: "Courier New", Courier, monospace;
+}

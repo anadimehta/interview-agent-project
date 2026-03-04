@@ -148,7 +148,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center px-6 py-12">
+    <div className="login-page-courier min-h-[80vh] flex items-center justify-center px-6 py-12">
       <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="hidden md:block rounded-2xl glass-card p-10">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-400 text-xs font-bold mb-6">
