@@ -69,6 +69,9 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
   const [consoleVisible, setConsoleVisible] = useState(false);
   const [consoleOutput, setConsoleOutput] = useState<string>("");
   const [isRunning, setIsRunning] = useState(false);
+  const [testCases, setTestCases] = useState<{ input: string; expected: string }[]>([]);
+  const [testResults, setTestResults] = useState<{ input: string; expected: string; output?: string; passed: boolean; error?: string }[]>([]);
+  const [currentTestIndex, setCurrentTestIndex] = useState<number>(0);
   const [consoleHeight, setConsoleHeight] = useState<number>(160);
   const draggingRef = useRef(false);
   const startYRef = useRef(0);
@@ -102,6 +105,22 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
   async function startInterview() {
     // Send an initial empty message to trigger the agent's greeting
     await sendMessageToAgent("Hello, I am ready for the interview.", true);
+    // Hardcoded mock question for local testing / demo
+    const mock = {
+      title: 'Sum Two Integers',
+      description: 'Read two integers from stdin and print their sum.',
+      examples: [
+        { input: '2 3', output: '5' },
+        { input: '10 20', output: '30' },
+        { input: '0 0', output: '0' }
+      ],
+      difficulty: 'Easy',
+      prompt: 'Given two integers separated by space, output their sum.'
+    };
+    setCurrentQuestion(mock);
+    // populate up to 3 test cases from examples
+    const cases = (mock.examples || []).slice(0, 3).map((e: any) => ({ input: String(e.input ?? ""), expected: String(e.output ?? e.expected ?? "") }));
+    setTestCases(cases);
   }
 
   async function sendMessageToAgent(content: string, isSystemInit = false) {
@@ -323,6 +342,12 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
   }
 
   async function runCode() {
+    // If there are test cases, run them via the local runner
+    if (testCases && testCases.length > 0) {
+      await runTests(false);
+      return;
+    }
+
     try {
       setIsRunning(true);
       // Show only final output (no interim "Running...")
@@ -336,8 +361,122 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
         const errs = data?.errors ?? (data?.error ? [{ line: 0, column: 0, message: data.error }] : []);
         const formatted = errs.map((e: any) => `Line ${e.line}${e.column ? `:${e.column}` : ""} - ${e.message}`).join("\n");
         const fallback = data?.compileStderr ?? data?.stderr ?? data?.error ?? `Run failed (${res.status})`;
-            setDiagnostics(errs ?? []);
-            setConsoleOutput(formatted || fallback);
+        setDiagnostics(errs ?? []);
+        setConsoleOutput(formatted || fallback);
+        setConsoleVisible(true);
+        return;
+      }
+
+      const out = data.stdout ?? data.compileStderr ?? data.stderr ?? "Run completed.";
+      setDiagnostics([]);
+      setConsoleOutput(out);
+      setConsoleVisible(true);
+    } catch (e) {
+      console.error(e);
+      setConsoleOutput(`Error: ${String(e)}`);
+      setConsoleVisible(true);
+    } finally {
+      setIsRunning(false);
+    }
+  }
+
+  function normalizeOutput(s: string | undefined) {
+    if (s == null) return "";
+    return String(s).replace(/\r\n/g, "\n").trim().replace(/\s+/g, " ");
+  }
+
+  async function runTests(useJudge: boolean) {
+    setTestResults([]);
+    const results: any[] = [];
+    for (let i = 0; i < testCases.length; i++) {
+      const tc = testCases[i];
+      try {
+        const url = useJudge ? '/api/judge0' : '/api/run';
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: editorValue, language, stdin: tc.input }),
+        });
+        const data = await res.json().catch(() => ({} as any));
+        if (!res.ok || data?.ok === false) {
+          const err = data?.error ?? data?.compileStderr ?? data?.stderr ?? `Run failed (${res.status})`;
+          results.push({ input: tc.input, expected: tc.expected, output: undefined, passed: false, error: String(err) });
+          setTestResults([...results]);
+          continue;
+        }
+
+        const out = normalizeOutput(data.stdout ?? data.runStdout ?? data.compileStderr ?? data.stderr ?? "");
+        const expect = normalizeOutput(tc.expected);
+        const passed = out === expect;
+        results.push({ input: tc.input, expected: tc.expected, output: out, passed, error: undefined });
+        setTestResults([...results]);
+      } catch (e) {
+        results.push({ input: tc.input, expected: tc.expected, output: undefined, passed: false, error: String(e) });
+        setTestResults([...results]);
+      }
+    }
+
+    const passedCount = results.filter(r => r.passed).length;
+    const summary = `Tests: ${passedCount}/${results.length} passed`;
+    const detail = results.map((r, idx) => `#${idx + 1} - ${r.passed ? 'PASS' : 'FAIL'} - expected: ${r.expected} got: ${r.output ?? r.error ?? ''}`).join("\n");
+    setConsoleOutput(`${summary}\n\n${detail}`);
+    setConsoleVisible(true);
+  }
+
+  async function runCase(useJudge: boolean) {
+    const idx = currentTestIndex;
+    if (idx < 0 || idx >= testCases.length) return;
+    const tc = testCases[idx];
+    try {
+      const url = useJudge ? '/api/judge0' : '/api/run';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: editorValue, language, stdin: tc.input }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.ok === false) {
+        const err = data?.error ?? data?.compileStderr ?? data?.stderr ?? `Run failed (${res.status})`;
+        const r = { input: tc.input, expected: tc.expected, output: undefined, passed: false, error: String(err) };
+        const next = [...testResults]; next[idx] = r; setTestResults(next);
+        setConsoleOutput(String(err)); setConsoleVisible(true);
+        return;
+      }
+      const out = normalizeOutput(data.stdout ?? data.runStdout ?? data.compileStderr ?? data.stderr ?? '');
+      const expect = normalizeOutput(tc.expected);
+      const passed = out === expect;
+      const r = { input: tc.input, expected: tc.expected, output: out, passed, error: undefined };
+      const next = [...testResults]; next[idx] = r; setTestResults(next);
+      setConsoleOutput(`${passed ? 'PASS' : 'FAIL'}\n\nExpected: ${tc.expected}\nGot: ${out}`);
+      setConsoleVisible(true);
+    } catch (e) {
+      const r = { input: tc.input, expected: tc.expected, output: undefined, passed: false, error: String(e) };
+      const next = [...testResults]; next[idx] = r; setTestResults(next);
+      setConsoleOutput(String(e)); setConsoleVisible(true);
+    }
+  }
+
+  async function runWithJudge0() {
+    // If we have test cases configured, run them via Judge0
+    if (testCases && testCases.length > 0) {
+      await runTests(true);
+      return;
+    }
+
+    try {
+      setIsRunning(true);
+      const res = await fetch('/api/judge0', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: editorValue, language, stdin: customInput }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.ok === false) {
+        const errs = data?.errors ?? (data?.error ? [{ line: 0, column: 0, message: data.error }] : []);
+        const formatted = errs.map((e: any) => `Line ${e.line}${e.column ? `:${e.column}` : ""} - ${e.message}`).join("\n");
+        const fallback = data?.compileStderr ?? data?.stderr ?? data?.error ?? `Run failed (${res.status})`;
+        setDiagnostics(errs ?? []);
+        setConsoleOutput(formatted || fallback);
         setConsoleVisible(true);
         return;
       }
@@ -456,6 +595,8 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
                     </div>
                   ))}
 
+                  {/* Testcases moved to right-side panel */}
+
                   {currentQuestion.constraints && (
                     <>
                       <p><strong>Constraints:</strong></p>
@@ -538,7 +679,7 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
                 })()}
               </div>
 
-              <div style={{ flex: 1, position: 'relative' }}>
+              <div style={{ flex: 1, position: 'relative', paddingRight: 360 }}>
                 <pre
                   ref={preRef as any}
                   aria-hidden
@@ -767,6 +908,25 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
                           ))}
                         </div>
                       </div>
+                    ) : testResults && testResults.length > 0 ? (
+                      <div className="p-3">
+                        <div className="text-sm font-semibold text-slate-200 mb-2">Test Results</div>
+                        <div className="space-y-2">
+                          {testResults.map((t, idx) => (
+                            <div key={idx} className={`px-2 py-2 rounded flex items-start justify-between ${t.passed ? 'bg-green-900/20' : 'bg-rose-900/10'}`}>
+                              <div>
+                                <div className="text-xs text-slate-300">Input: <span className="font-mono">{t.input}</span></div>
+                                <div className="text-xs text-slate-300">Expected: <span className="font-mono">{t.expected}</span></div>
+                                <div className="text-xs text-slate-300">Output: <span className="font-mono">{t.output ?? t.error ?? ''}</span></div>
+                              </div>
+                              <div className={`text-sm font-semibold ${t.passed ? 'text-green-400' : 'text-rose-300'}`}>{t.passed ? 'PASS' : 'FAIL'}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-3">
+                          <pre className="whitespace-pre-wrap text-xs bg-transparent p-2 rounded" style={{ minHeight: 48 }}>{consoleOutput || '— No output —'}</pre>
+                        </div>
+                      </div>
                     ) : (
                       <div className="p-3">
                         <div className="text-xs text-slate-400 mb-2">Output</div>
@@ -777,6 +937,57 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
 
                   <div className="bg-black/80 border border-white/10 px-3 py-2 text-xs text-slate-400">Tip: Click an error to jump to that line.</div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right-side Testcase panel */}
+          <div style={{ position: 'absolute', right: 16, top: 72, bottom: 72, width: 336, overflow: 'auto' }} className="bg-slate-800/30 rounded border border-white/5 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold text-slate-200">Testcase</div>
+              <div className="flex gap-2">
+                <button onClick={() => runCase(false)} className="text-xs px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Run Case</button>
+                <button onClick={() => runTests(false)} className="text-xs px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Run All</button>
+              </div>
+            </div>
+
+            <div className="mb-3">
+              <div className="flex items-center gap-2 mb-2">
+                {(testCases.length ? testCases : [{ input: '', expected: '' }]).map((t, idx) => (
+                  <button key={idx} onClick={() => setCurrentTestIndex(idx)} className={`px-3 py-1 text-xs rounded-t ${currentTestIndex === idx ? 'bg-slate-700 text-white' : 'bg-transparent text-slate-300 hover:bg-slate-700/30'}`}>
+                    Case {idx + 1}
+                  </button>
+                ))}
+                <button onClick={() => {
+                  const next = [...testCases, { input: '', expected: '' }];
+                  setTestCases(next);
+                  setCurrentTestIndex(next.length - 1);
+                }} className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600">+</button>
+              </div>
+
+              <div className="text-xs text-slate-300 mb-1">Input</div>
+              <textarea value={(testCases[currentTestIndex] && testCases[currentTestIndex].input) || ''} onChange={(e) => {
+                const next = [...testCases];
+                next[currentTestIndex] = { ...(next[currentTestIndex] || { input: '', expected: '' }), input: e.target.value };
+                setTestCases(next);
+              }} className="w-full bg-slate-800 p-2 text-xs text-white rounded resize-none mb-2" rows={3} />
+
+              <div className="text-xs text-slate-300 mb-1">Expected</div>
+              <textarea value={(testCases[currentTestIndex] && testCases[currentTestIndex].expected) || ''} onChange={(e) => {
+                const next = [...testCases];
+                next[currentTestIndex] = { ...(next[currentTestIndex] || { input: '', expected: '' }), expected: e.target.value };
+                setTestCases(next);
+              }} className="w-full bg-slate-800 p-2 text-xs text-white rounded resize-none mb-2" rows={2} />
+
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-slate-400">Result</div>
+                <div className={`text-sm font-semibold ${testResults[currentTestIndex]?.passed ? 'text-green-400' : (testResults[currentTestIndex] ? 'text-rose-300' : 'text-slate-400')}`}>
+                  {testResults[currentTestIndex] ? (testResults[currentTestIndex].passed ? 'PASS' : 'FAIL') : '—'}
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <pre className="whitespace-pre-wrap text-xs bg-transparent p-2 rounded" style={{ minHeight: 48 }}>{consoleOutput || '— No output —'}</pre>
               </div>
             </div>
           </div>
@@ -825,6 +1036,7 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
             </div>
             <div className="flex items-center gap-3">
               <button onClick={runCode} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-300 hover:bg-white/5 border border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">Run Code</button>
+              <button onClick={runWithJudge0} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-300 hover:bg-white/5 border border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">Run (Judge0)</button>
               <button onClick={submitSolution} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-500 transition shadow-lg shadow-green-500/10 disabled:opacity-50 disabled:cursor-not-allowed">Submit</button>
             </div>
           </div>
