@@ -58,7 +58,8 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
   const startedAtMsRef = useRef<number>(Date.now());
   const endedRef = useRef(false);
   const startedInterviewKeyRef = useRef<string | null>(null);
-
+  const [activeBottomTab, setActiveBottomTab] = useState<"testcase" | "result">("testcase");
+const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | "compile" | null>(null);
   // Agent State
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [interviewState, setInterviewState] = useState<'intro' | 'approach' | 'coding' | 'finished'>('intro');
@@ -69,7 +70,7 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
   const [consoleVisible, setConsoleVisible] = useState(false);
   const [consoleOutput, setConsoleOutput] = useState<string>("");
   const [isRunning, setIsRunning] = useState(false);
-  const [testCases, setTestCases] = useState<{ input: string; expected: string }[]>([]);
+ const [testCases, setTestCases] = useState<{ input: string; expected: string; custom?: boolean }[]>([]);
   const [testResults, setTestResults] = useState<{ input: string; expected: string; output?: string; passed: boolean; error?: string }[]>([]);
   const [currentTestIndex, setCurrentTestIndex] = useState<number>(0);
   const [consoleHeight, setConsoleHeight] = useState<number>(160);
@@ -119,7 +120,7 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
     };
     setCurrentQuestion(mock);
     // populate up to 3 test cases from examples
-    const cases = (mock.examples || []).slice(0, 3).map((e: any) => ({ input: String(e.input ?? ""), expected: String(e.output ?? e.expected ?? "") }));
+    const cases = (mock.examples || []).slice(0, 3).map((e: any) => ({ input: String(e.input ?? ""), expected: String(e.output ?? e.expected ?? ""), custom: false }));
     setTestCases(cases);
   }
 
@@ -417,7 +418,18 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
     }
 
     const passedCount = results.filter(r => r.passed).length;
-    const summary = `Tests: ${passedCount}/${results.length} passed`;
+
+if (results.some(r => r.error)) {
+  setSubmissionStatus("compile");
+} else if (passedCount === results.length) {
+  setSubmissionStatus("accepted");
+} else {
+  setSubmissionStatus("wrong");
+}
+
+setActiveBottomTab("result");
+
+const summary = `Tests: ${passedCount}/${results.length} passed`;
     const detail = results.map((r, idx) => `#${idx + 1} - ${r.passed ? 'PASS' : 'FAIL'} - expected: ${r.expected} got: ${r.output ?? r.error ?? ''}`).join("\n");
     setConsoleOutput(`${summary}\n\n${detail}`);
     setConsoleVisible(true);
@@ -438,8 +450,11 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
       if (!res.ok || data?.ok === false) {
         const err = data?.error ?? data?.compileStderr ?? data?.stderr ?? `Run failed (${res.status})`;
         const r = { input: tc.input, expected: tc.expected, output: undefined, passed: false, error: String(err) };
-        const next = [...testResults]; next[idx] = r; setTestResults(next);
+        const next = [...testResults];
+         while (next.length <= idx) next.push(undefined as any); next[idx] = r; setTestResults(next);
+       
         setConsoleOutput(String(err)); setConsoleVisible(true);
+        setActiveBottomTab("result");
         return;
       }
       const out = normalizeOutput(data.stdout ?? data.runStdout ?? data.compileStderr ?? data.stderr ?? '');
@@ -449,10 +464,15 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
       const next = [...testResults]; next[idx] = r; setTestResults(next);
       setConsoleOutput(`${passed ? 'PASS' : 'FAIL'}\n\nExpected: ${tc.expected}\nGot: ${out}`);
       setConsoleVisible(true);
+      setActiveBottomTab("result");
     } catch (e) {
       const r = { input: tc.input, expected: tc.expected, output: undefined, passed: false, error: String(e) };
-      const next = [...testResults]; next[idx] = r; setTestResults(next);
+      const next = [...testResults]; 
+      while (next.length <= idx) next.push(undefined as any);next[idx] = r; 
+      
+      setTestResults(next);
       setConsoleOutput(String(e)); setConsoleVisible(true);
+      setActiveBottomTab("result");
     }
   }
 
@@ -668,7 +688,7 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
             </div>
           </div>
 
-            <div className="flex-1 relative" style={{ minHeight: 0 }}>
+            <div className="flex-1 relative pb-[340px]" style={{ minHeight: 0 }}>
             <div className="absolute inset-0 w-full h-full flex">
               <div ref={gutterRef} className="gutter" style={{ width: GUTTER_WIDTH }}>
                 {(() => {
@@ -679,7 +699,7 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
                 })()}
               </div>
 
-              <div style={{ flex: 1, position: 'relative', paddingRight: 360 }}>
+              <div style={{ flex: 1, position: 'relative', paddingRight: 0 }}>
                 <pre
                   ref={preRef as any}
                   aria-hidden
@@ -824,173 +844,203 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
               <h3 className="text-lg font-bold text-white mb-2">Editor Locked</h3>
               <p className="text-sm text-slate-400 max-w-xs text-center">Please explain your approach to the AI Agent to unlock the coding environment.</p>
             </div>
-
+</div>
             {/* Bottom console panel (draggable/expandable) */}
-            <div
-              className="absolute left-0 right-0 flex justify-center"
-              style={{ left: GUTTER_WIDTH + 16, right: 16, bottom: 0, pointerEvents: 'auto' }}
-            >
-              <div
-                className="w-full"
-                style={{ maxWidth: 'calc(100% - 0px)', boxSizing: 'border-box' }}
-              >
-                <div
-                  className={`transition-all duration-150 ${consoleVisible ? 'rounded-t' : 'rounded-t'} `}
-                  style={{
-                    height: consoleVisible ? consoleHeight : 36,
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    boxSizing: 'border-box'
-                  }}
-                >
-                  {/* draggable handle / collapsed bar */}
-                  <div
-                    onMouseDown={(e) => {
-                      draggingRef.current = true;
-                      startYRef.current = e.clientY;
-                      startHeightRef.current = consoleHeight;
-                    }}
-                    onTouchStart={(e) => {
-                      draggingRef.current = true;
-                      startYRef.current = e.touches[0]?.clientY || 0;
-                      startHeightRef.current = consoleHeight;
-                    }}
-                    className="bg-black/80 border border-white/10 px-3 py-2 flex items-center justify-between cursor-row-resize"
-                    style={{ userSelect: 'none' }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="text-sm font-semibold text-slate-200">Console</div>
-                      <div className="text-xs text-slate-400">Output</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => { setConsoleOutput(''); setDiagnostics([]); }}
-                        className="text-xs text-slate-400 hover:text-white px-2"
-                      >
-                        Clear
-                      </button>
-                      <button
-                        onClick={() => { navigator.clipboard?.writeText(consoleOutput).catch(() => {}); }}
-                        className="text-xs text-slate-400 hover:text-white px-2"
-                      >
-                        Copy
-                      </button>
-                      <button onClick={() => setConsoleVisible((v) => !v)} className="text-xs text-slate-400 hover:text-white px-2">{consoleVisible ? 'Collapse' : 'Expand'}</button>
-                    </div>
-                  </div>
+           {/* Bottom Panel */}
+<div className="absolute left-0 right-0 bottom-12 bg-[#1e1e1e] border-t border-[#333]">
 
-                  {/* content area */}
-                  <div style={{ flex: 1, background: 'rgba(0,0,0,0.9)', borderLeft: '1px solid rgba(255,255,255,0.06)', borderRight: '1px solid rgba(255,255,255,0.06)' }} className="overflow-auto">
-                    {diagnostics && diagnostics.length > 0 ? (
-                      <div className="p-3">
-                        <div className="text-sm font-semibold text-rose-300 mb-2">Errors</div>
-                        <div className="bg-transparent rounded p-1" style={{ maxHeight: 340, overflow: 'auto' }}>
-                          {diagnostics.map((d, idx) => (
-                            <div key={idx} className="px-2 py-2 hover:bg-white/5 cursor-pointer rounded" onClick={() => {
-                              const line = Math.max(1, Number(d.line) || 1);
-                              const la = editorRef.current as HTMLTextAreaElement | null;
-                              if (la) {
-                                const lineHeight = 1.5 * 13;
-                                la.scrollTop = Math.max(0, (line - 1) * lineHeight);
-                                if (preRef.current) (preRef.current as HTMLElement).scrollTop = la.scrollTop;
-                                if (gutterRef.current) gutterRef.current.scrollTop = la.scrollTop;
-                                const lines = (editorValue || '').split('\n');
-                                let pos = 0;
-                                for (let i = 0; i < line - 1 && i < lines.length; i++) pos += lines[i].length + 1;
-                                la.focus();
-                                la.setSelectionRange(pos, pos);
-                              }
-                            }}>
-                              <div className="text-xs text-rose-300">Line {d.line}{d.column ? `:${d.column}` : ''}</div>
-                              <div className="text-sm text-slate-200">{d.message}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : testResults && testResults.length > 0 ? (
-                      <div className="p-3">
-                        <div className="text-sm font-semibold text-slate-200 mb-2">Test Results</div>
-                        <div className="space-y-2">
-                          {testResults.map((t, idx) => (
-                            <div key={idx} className={`px-2 py-2 rounded flex items-start justify-between ${t.passed ? 'bg-green-900/20' : 'bg-rose-900/10'}`}>
-                              <div>
-                                <div className="text-xs text-slate-300">Input: <span className="font-mono">{t.input}</span></div>
-                                <div className="text-xs text-slate-300">Expected: <span className="font-mono">{t.expected}</span></div>
-                                <div className="text-xs text-slate-300">Output: <span className="font-mono">{t.output ?? t.error ?? ''}</span></div>
-                              </div>
-                              <div className={`text-sm font-semibold ${t.passed ? 'text-green-400' : 'text-rose-300'}`}>{t.passed ? 'PASS' : 'FAIL'}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="mt-3">
-                          <pre className="whitespace-pre-wrap text-xs bg-transparent p-2 rounded" style={{ minHeight: 48 }}>{consoleOutput || '— No output —'}</pre>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-3">
-                        <div className="text-xs text-slate-400 mb-2">Output</div>
-                        <pre className="whitespace-pre-wrap text-xs bg-transparent p-2 rounded" style={{ minHeight: 64 }}>{consoleOutput || '— No output —'}</pre>
-                      </div>
-                    )}
-                  </div>
+  {/* Tabs */}
+  <div className="flex items-center gap-6 px-4 py-2 border-b border-[#333] text-sm">
 
-                  <div className="bg-black/80 border border-white/10 px-3 py-2 text-xs text-slate-400">Tip: Click an error to jump to that line.</div>
-                </div>
-              </div>
-            </div>
+    <button
+      onClick={() => setActiveBottomTab("testcase")}
+      className={`${
+        activeBottomTab === "testcase"
+          ? "text-green-400"
+          : "text-slate-400"
+      }`}
+    >
+      Testcase
+    </button>
+
+    <button
+      onClick={() => setActiveBottomTab("result")}
+      className={`${
+        activeBottomTab === "result"
+          ? "text-green-400"
+          : "text-slate-400"
+      }`}
+    >
+      Test Result
+    </button>
+
+  </div>
+
+  {/* Content */}
+  <div className="p-4 max-h-[300px] overflow-auto">
+{activeBottomTab === "testcase" && (
+
+  <div>
+
+    {/* Case Tabs + Run Buttons */}
+    <div className="flex items-center justify-between mb-4">
+
+      <div className="flex gap-2">
+
+        {testCases.map((_, i) => (
+
+          <button
+            key={i}
+            onClick={() => setCurrentTestIndex(i)}
+            className={`px-3 py-1 text-xs rounded ${
+              currentTestIndex === i
+                ? "bg-slate-700 text-white"
+                : "bg-slate-800 text-slate-400"
+            }`}
+          >
+            Case {i + 1}
+          </button>
+
+
+        ))}
+<button
+  onClick={() => {
+    const next = [...testCases, { input: "", expected: "", custom: true }];
+    setTestCases(next);
+    setCurrentTestIndex(next.length - 1);
+  }}
+  className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
+>
+  +
+</button>
+      </div>
+
+      <div className="flex gap-2">
+
+        <button
+          onClick={() => runCase(false)}
+          className="px-3 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
+        >
+          Run Case
+        </button>
+
+        <button
+          onClick={() => runTests(false)}
+          className="px-3 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
+        >
+          Run All
+        </button>
+
+      </div>
+
+    </div>
+
+        {/* Input */}
+        <div className="mb-3">
+
+  <div className="text-xs text-slate-400 mb-1">Input</div>
+
+  {testCases[currentTestIndex]?.custom ? (
+
+    <textarea
+      value={testCases[currentTestIndex]?.input || ""}
+      onChange={(e) => {
+        const next = [...testCases];
+        next[currentTestIndex] = {
+          ...(next[currentTestIndex]),
+          input: e.target.value,
+        };
+        setTestCases(next);
+      }}
+      className="w-full bg-slate-800 p-2 text-xs text-white rounded resize-none"
+      rows={3}
+    />
+
+  ) : (
+
+    <div className="bg-slate-800 p-3 rounded text-sm">
+      {testCases[currentTestIndex]?.input}
+    </div>
+
+  )}
+
+</div>
+
+        {/* Expected */}
+
+        <div>
+
+  <div className="text-xs text-slate-400 mb-1">Expected</div>
+
+  {testCases[currentTestIndex]?.custom ? (
+
+    <textarea
+      value={testCases[currentTestIndex]?.expected || ""}
+      onChange={(e) => {
+        const next = [...testCases];
+        next[currentTestIndex] = {
+          ...(next[currentTestIndex]),
+          expected: e.target.value,
+        };
+        setTestCases(next);
+      }}
+      className="w-full bg-slate-800 p-2 text-xs text-white rounded resize-none"
+      rows={2}
+    />
+
+  ) : (
+
+    <div className="bg-slate-800 p-3 rounded text-sm">
+      {testCases[currentTestIndex]?.expected}
+    </div>
+
+  )}
+
+</div>
+
+      </div>
+
+    )}
+
+    {activeBottomTab === "result" && (
+
+      <div>
+
+        {submissionStatus === "compile" && (
+
+          <div className="text-red-400 font-semibold mb-3">
+            Compile Error
           </div>
 
-          {/* Right-side Testcase panel */}
-          <div style={{ position: 'absolute', right: 16, top: 72, bottom: 72, width: 336, overflow: 'auto' }} className="bg-slate-800/30 rounded border border-white/5 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-sm font-semibold text-slate-200">Testcase</div>
-              <div className="flex gap-2">
-                <button onClick={() => runCase(false)} className="text-xs px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Run Case</button>
-                <button onClick={() => runTests(false)} className="text-xs px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Run All</button>
-              </div>
-            </div>
+        )}
 
-            <div className="mb-3">
-              <div className="flex items-center gap-2 mb-2">
-                {(testCases.length ? testCases : [{ input: '', expected: '' }]).map((t, idx) => (
-                  <button key={idx} onClick={() => setCurrentTestIndex(idx)} className={`px-3 py-1 text-xs rounded-t ${currentTestIndex === idx ? 'bg-slate-700 text-white' : 'bg-transparent text-slate-300 hover:bg-slate-700/30'}`}>
-                    Case {idx + 1}
-                  </button>
-                ))}
-                <button onClick={() => {
-                  const next = [...testCases, { input: '', expected: '' }];
-                  setTestCases(next);
-                  setCurrentTestIndex(next.length - 1);
-                }} className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600">+</button>
-              </div>
+        {submissionStatus === "wrong" && (
 
-              <div className="text-xs text-slate-300 mb-1">Input</div>
-              <textarea value={(testCases[currentTestIndex] && testCases[currentTestIndex].input) || ''} onChange={(e) => {
-                const next = [...testCases];
-                next[currentTestIndex] = { ...(next[currentTestIndex] || { input: '', expected: '' }), input: e.target.value };
-                setTestCases(next);
-              }} className="w-full bg-slate-800 p-2 text-xs text-white rounded resize-none mb-2" rows={3} />
-
-              <div className="text-xs text-slate-300 mb-1">Expected</div>
-              <textarea value={(testCases[currentTestIndex] && testCases[currentTestIndex].expected) || ''} onChange={(e) => {
-                const next = [...testCases];
-                next[currentTestIndex] = { ...(next[currentTestIndex] || { input: '', expected: '' }), expected: e.target.value };
-                setTestCases(next);
-              }} className="w-full bg-slate-800 p-2 text-xs text-white rounded resize-none mb-2" rows={2} />
-
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-slate-400">Result</div>
-                <div className={`text-sm font-semibold ${testResults[currentTestIndex]?.passed ? 'text-green-400' : (testResults[currentTestIndex] ? 'text-rose-300' : 'text-slate-400')}`}>
-                  {testResults[currentTestIndex] ? (testResults[currentTestIndex].passed ? 'PASS' : 'FAIL') : '—'}
-                </div>
-              </div>
-
-              <div className="mt-3">
-                <pre className="whitespace-pre-wrap text-xs bg-transparent p-2 rounded" style={{ minHeight: 48 }}>{consoleOutput || '— No output —'}</pre>
-              </div>
-            </div>
+          <div className="text-red-400 font-semibold mb-3">
+            Wrong Answer
           </div>
+
+        )}
+
+        {submissionStatus === "accepted" && (
+
+          <div className="text-green-400 font-semibold mb-3">
+            Accepted
+          </div>
+
+        )}
+
+        <pre className="bg-slate-900 p-3 rounded text-xs whitespace-pre-wrap">
+          {consoleOutput}
+        </pre>
+
+      </div>
+
+    )}
+
+  </div>
+
+</div>
 
           <style jsx>{`
             :global(.error-underline) {
@@ -1031,12 +1081,12 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
           <div className="h-12 bg-[#1e1e1e] border-t border-[#333] flex items-center justify-between px-4 shrink-0">
 
             <div className="flex items-center gap-3">
-              <button onClick={() => setConsoleVisible((v) => !v)} className="text-xs text-slate-400 hover:text-white flex items-center gap-2">Console</button>
-              <button onClick={() => setShowCustomInput((s) => !s)} className="text-xs text-slate-400 hover:text-white flex items-center gap-2">Input</button>
+              {/* <button onClick={() => setConsoleVisible((v) => !v)} className="text-xs text-slate-400 hover:text-white flex items-center gap-2">Console</button>
+              <button onClick={() => setShowCustomInput((s) => !s)} className="text-xs text-slate-400 hover:text-white flex items-center gap-2">Input</button> */}
             </div>
             <div className="flex items-center gap-3">
-              <button onClick={runCode} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-300 hover:bg-white/5 border border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">Run Code</button>
-              <button onClick={runWithJudge0} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-300 hover:bg-white/5 border border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">Run (Judge0)</button>
+              {/* <button onClick={runCode} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-300 hover:bg-white/5 border border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">Run Code</button> */}
+              <button onClick={runWithJudge0} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-300 hover:bg-white/5 border border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">Run</button>
               <button onClick={submitSolution} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-500 transition shadow-lg shadow-green-500/10 disabled:opacity-50 disabled:cursor-not-allowed">Submit</button>
             </div>
           </div>
