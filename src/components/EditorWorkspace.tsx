@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import Editor, { OnMount } from '@monaco-editor/react';
+import Editor from '@monaco-editor/react';
 import { supabase } from "../lib/supabaseClient";
 
 const ACTIVE_SESSION_STORAGE_KEY = "interview_agent_active_session_v1";
@@ -48,6 +48,28 @@ type Props = {
   onEnd?: () => void;
 };
 
+const FIXED_THREE_SUM_QUESTION = {
+  title: "3Sum",
+  description:
+    'Given an integer array nums, return all the triplets [nums[i], nums[j], nums[k]] such that i != j, i != k, and j != k, and nums[i] + nums[j] + nums[k] == 0. The solution set must not contain duplicate triplets.\n\nInput format for this editor:\n- First line: integer n\n- Second line: n space-separated integers\n\nOutput format for deterministic judging:\n- Print each unique triplet as "a b c" (values inside each triplet in nondecreasing order)\n- Print triplets in lexicographic order, one triplet per line\n- If no triplet exists, print []',
+  examples: [
+    { input: "6\n-1 0 1 2 -1 -4", output: "-1 -1 2\n-1 0 1" },
+    { input: "3\n0 1 1", output: "[]" },
+    { input: "5\n0 0 0 0 0", output: "0 0 0" },
+  ],
+  difficulty: "Medium",
+  prompt:
+    "Given an integer array nums, return all unique triplets whose sum is 0. Do not return duplicate triplets.",
+};
+
+function getDefaultThreeSumTestCases() {
+  return (FIXED_THREE_SUM_QUESTION.examples || []).slice(0, 3).map((e: any) => ({
+    input: String(e.input ?? ""),
+    expected: String(e.output ?? e.expected ?? ""),
+    custom: false,
+  }));
+}
+
 export default function EditorWorkspace({ company, topic, duration, excludeTopics, onEnd }: Props) {
   const [unlocked, setUnlocked] = useState(false);
   const [agentText, setAgentText] = useState("\"Connecting to session...\"");
@@ -60,7 +82,8 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
   const endedRef = useRef(false);
   const startedInterviewKeyRef = useRef<string | null>(null);
   const [activeBottomTab, setActiveBottomTab] = useState<"testcase" | "result">("testcase");
-const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | "compile" | null>(null);
+  const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | "compile" | null>(null);
+  
   // Agent State
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [interviewState, setInterviewState] = useState<'intro' | 'approach' | 'coding' | 'finished'>('intro');
@@ -71,17 +94,12 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
   const [consoleVisible, setConsoleVisible] = useState(false);
   const [consoleOutput, setConsoleOutput] = useState<string>("");
   const [isRunning, setIsRunning] = useState(false);
- const [testCases, setTestCases] = useState<{ input: string; expected: string; custom?: boolean }[]>([]);
+  const [testCases, setTestCases] = useState<{ input: string; expected: string; custom?: boolean }[]>([]);
   const [testResults, setTestResults] = useState<{ input: string; expected: string; output?: string; passed: boolean; error?: string }[]>([]);
   const [currentTestIndex, setCurrentTestIndex] = useState<number>(0);
-  const [consoleHeight, setConsoleHeight] = useState<number>(160);
-  const draggingRef = useRef(false);
-  const startYRef = useRef(0);
-  const startHeightRef = useRef(0);
   const [customInput, setCustomInput] = useState<string>("");
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [diagnostics, setDiagnostics] = useState<{ line: number; column?: number; message: string }[]>([]);
-  // Monaco handles gutter and rendering
 
   const excludeKey = (excludeTopics ?? []).filter(Boolean).join(",");
   const interviewKey = `${company}__${topic}__${duration}__${excludeKey}`;
@@ -95,7 +113,11 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
     setUnlocked(false);
     setMessages([]);
     setInterviewState("intro");
-    setCurrentQuestion(null);
+    setCurrentQuestion(FIXED_THREE_SUM_QUESTION);
+    setTestCases(getDefaultThreeSumTestCases());
+    setCurrentTestIndex(0);
+    setTestResults([]);
+    setSubmissionStatus(null);
     setAgentText(`"Connecting to AI Interviewer..."`);
 
     void startInterview();
@@ -105,27 +127,11 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
   async function startInterview() {
     // Send an initial empty message to trigger the agent's greeting
     await sendMessageToAgent("Hello, I am ready for the interview.", true);
-    // Hardcoded mock question for local testing / demo
-    const mock = {
-      title: 'Sum Two Integers',
-      description: 'Read two integers from stdin and print their sum.',
-      examples: [
-        { input: '2 3', output: '5' },
-        { input: '10 20', output: '30' },
-        { input: '0 0', output: '0' }
-      ],
-      difficulty: 'Easy',
-      prompt: 'Given two integers separated by space, output their sum.'
-    };
-    setCurrentQuestion(mock);
-    // populate up to 3 test cases from examples
-    const cases = (mock.examples || []).slice(0, 3).map((e: any) => ({ input: String(e.input ?? ""), expected: String(e.output ?? e.expected ?? ""), custom: false }));
-    setTestCases(cases);
   }
 
   async function sendMessageToAgent(content: string, isSystemInit = false) {
     if (!content.trim()) return;
-    
+
     setIsAgentLoading(true);
     const newMessages = isSystemInit ? [] : [...messages, { role: 'user', content }];
     setMessages(newMessages);
@@ -138,7 +144,7 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
         body: JSON.stringify({
           messages: newMessages,
           state: interviewState,
-          currentQuestion,
+          currentQuestion: currentQuestion ?? FIXED_THREE_SUM_QUESTION,
           code: editorValue, // Send current code to agent
           company,
           topic,
@@ -157,7 +163,7 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
         setMessages((prev) => [...prev, { role: 'model', content: combined }]);
         return;
       }
-      
+
       if (data.message) {
         setAgentText(`"${data.message}"`);
         setMessages(prev => [...prev, { role: 'model', content: data.message }]);
@@ -165,6 +171,14 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
 
       if (data.newQuestion) {
         setCurrentQuestion(data.newQuestion);
+        if (data.newQuestion.examples) {
+          const cases = (data.newQuestion.examples || []).slice(0, 3).map((e: any) => ({
+            input: String(e.input ?? ""),
+            expected: String(e.output ?? e.expected ?? ""),
+            custom: false
+          }));
+          setTestCases(cases);
+        }
       }
 
       if (data.nextState && data.nextState !== interviewState) {
@@ -245,34 +259,6 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
     return () => clearInterval(t);
   }, []);
 
-  // Handle drag-to-resize for console panel
-  useEffect(() => {
-    function onMove(e: any) {
-      if (!draggingRef.current) return;
-      const clientY = typeof e.clientY === 'number' ? e.clientY : (e.touches && e.touches[0]?.clientY) || 0;
-      const dy = startYRef.current - clientY;
-      const maxH = Math.max(120, (window.innerHeight || 800) - 120);
-      const minH = 64;
-      const newH = Math.max(minH, Math.min(maxH, startHeightRef.current + dy));
-      setConsoleHeight(newH);
-    }
-
-    function onUp() {
-      draggingRef.current = false;
-    }
-
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('touchmove', onMove, { passive: false });
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('touchend', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('touchend', onUp);
-    };
-  }, []);
-
   // Ensure timer is set to the chosen interview duration when the component mounts
   // or when the duration prop changes. This guarantees the countdown begins
   // immediately for the full interview time chosen in the SetupModal.
@@ -343,46 +329,7 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
     const hrs = Math.floor(timerSeconds / 3600);
     const mins = Math.floor((timerSeconds % 3600) / 60);
     const secs = timerSeconds % 60;
-    return `${hrs.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
-  }
-
-  async function runCode() {
-    // If there are test cases, run them via the local runner
-    if (testCases && testCases.length > 0) {
-      await runTests(false);
-      return;
-    }
-
-    try {
-      setIsRunning(true);
-      // Show only final output (no interim "Running...")
-      const res = await fetch("/api/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: editorValue, language, stdin: customInput }),
-      });
-      const data = await res.json().catch(() => ({} as any));
-      if (!res.ok || data?.ok === false) {
-        const errs = data?.errors ?? (data?.error ? [{ line: 0, column: 0, message: data.error }] : []);
-        const formatted = errs.map((e: any) => `Line ${e.line}${e.column ? `:${e.column}` : ""} - ${e.message}`).join("\n");
-        const fallback = data?.compileStderr ?? data?.stderr ?? data?.error ?? `Run failed (${res.status})`;
-        setDiagnostics(errs ?? []);
-        setConsoleOutput(formatted || fallback);
-        setConsoleVisible(true);
-        return;
-      }
-
-      const out = data.stdout ?? data.compileStderr ?? data.stderr ?? "Run completed.";
-      setDiagnostics([]);
-      setConsoleOutput(out);
-      setConsoleVisible(true);
-    } catch (e) {
-      console.error(e);
-      setConsoleOutput(`Error: ${String(e)}`);
-      setConsoleVisible(true);
-    } finally {
-      setIsRunning(false);
-    }
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
   function normalizeOutput(s: string | undefined) {
@@ -403,11 +350,12 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
           body: JSON.stringify({ code: editorValue, language, stdin: tc.input }),
         });
         const data = await res.json().catch(() => ({} as any));
-        // If compilation/compile_output present, stop and show it once (LeetCode-like behavior)
+        
+        // Check for compilation errors
         const compileOutput = data?.compileStderr ?? data?.compile_output ?? data?.compileOutput;
         const diagnosticsFromResp = data?.errors ?? data?.diagnostics;
+        
         if (compileOutput || (Array.isArray(diagnosticsFromResp) && diagnosticsFromResp.length > 0)) {
-          // Show compilation error once and abort further test runs
           const errMsg = compileOutput ?? (Array.isArray(diagnosticsFromResp) ? diagnosticsFromResp.map((d: any) => d.message ?? JSON.stringify(d)).join('\n') : (data?.error ?? `Run failed (${res.status})`));
           setDiagnostics(Array.isArray(diagnosticsFromResp) ? diagnosticsFromResp : []);
           setSubmissionStatus("compile");
@@ -435,24 +383,22 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
       }
     }
 
-        const passedCount = results.filter(r => r.passed).length;
-        if (passedCount === results.length) {
-          setSubmissionStatus("accepted");
-        } else {
-          setSubmissionStatus("wrong");
-        }
+    const passedCount = results.filter(r => r.passed).length;
+    if (passedCount === results.length) {
+      setSubmissionStatus("accepted");
+    } else {
+      setSubmissionStatus("wrong");
+    }
 
-        setActiveBottomTab("result");
-
-        const summary = `Tests: ${passedCount}/${results.length} passed`;
-        // Show concise PASS/FAIL per test; include expected/got only for failed cases
-        const detail = results.map((r, idx) => {
-          if (r.passed) return `#${idx + 1} - PASS`;
-          const got = r.output ?? r.error ?? '';
-          return `#${idx + 1} - FAIL - expected: ${r.expected} got: ${got}`;
-        }).join("\n");
-        setConsoleOutput(`${summary}\n\n${detail}`);
-        setConsoleVisible(true);
+    setActiveBottomTab("result");
+    const summary = `Tests: ${passedCount}/${results.length} passed`;
+    const detail = results.map((r, idx) => {
+      if (r.passed) return `#${idx + 1} - PASS`;
+      const got = r.output ?? r.error ?? '';
+      return `#${idx + 1} - FAIL - expected: ${r.expected} got: ${got}`;
+    }).join("\n");
+    setConsoleOutput(`${summary}\n\n${detail}`);
+    setConsoleVisible(true);
   }
 
   async function runCase(useJudge: boolean) {
@@ -467,10 +413,11 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
         body: JSON.stringify({ code: editorValue, language, stdin: tc.input }),
       });
       const data = await res.json().catch(() => ({} as any));
+      
       const compileOutput = data?.compileStderr ?? data?.compile_output ?? data?.compileOutput;
       const diagnosticsFromResp = data?.errors ?? data?.diagnostics;
+      
       if (compileOutput || (Array.isArray(diagnosticsFromResp) && diagnosticsFromResp.length > 0)) {
-        // Compilation error: show once
         const errMsg = compileOutput ?? (Array.isArray(diagnosticsFromResp) ? diagnosticsFromResp.map((d: any) => d.message ?? JSON.stringify(d)).join('\n') : (data?.error ?? `Run failed (${res.status})`));
         setDiagnostics(Array.isArray(diagnosticsFromResp) ? diagnosticsFromResp : []);
         setSubmissionStatus("compile");
@@ -484,33 +431,39 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
         const err = data?.error ?? data?.stderr ?? `Run failed (${res.status})`;
         const r = { input: tc.input, expected: tc.expected, output: undefined, passed: false, error: String(err) };
         const next = [...testResults];
-         while (next.length <= idx) next.push(undefined as any); next[idx] = r; setTestResults(next);
-        
-        setConsoleOutput(String(err)); setConsoleVisible(true);
+        while (next.length <= idx) next.push(undefined as any); 
+        next[idx] = r; 
+        setTestResults(next);
+        setConsoleOutput(String(err)); 
+        setConsoleVisible(true);
         setActiveBottomTab("result");
         return;
       }
+      
       const out = normalizeOutput(data.stdout ?? data.runStdout ?? data.compileStderr ?? data.stderr ?? '');
       const expect = normalizeOutput(tc.expected);
       const passed = out === expect;
       const r = { input: tc.input, expected: tc.expected, output: out, passed, error: undefined };
-      const next = [...testResults]; next[idx] = r; setTestResults(next);
+      const next = [...testResults]; 
+      while (next.length <= idx) next.push(undefined as any);
+      next[idx] = r; 
+      setTestResults(next);
       setConsoleOutput(`${passed ? 'PASS' : 'FAIL'}\n\nExpected: ${tc.expected}\nGot: ${out}`);
       setConsoleVisible(true);
       setActiveBottomTab("result");
     } catch (e) {
       const r = { input: tc.input, expected: tc.expected, output: undefined, passed: false, error: String(e) };
       const next = [...testResults]; 
-      while (next.length <= idx) next.push(undefined as any);next[idx] = r; 
-      
+      while (next.length <= idx) next.push(undefined as any);
+      next[idx] = r; 
       setTestResults(next);
-      setConsoleOutput(String(e)); setConsoleVisible(true);
+      setConsoleOutput(String(e)); 
+      setConsoleVisible(true);
       setActiveBottomTab("result");
     }
   }
 
   async function runWithJudge0() {
-    // If we have test cases configured, run them via Judge0
     if (testCases && testCases.length > 0) {
       await runTests(true);
       return;
@@ -582,8 +535,6 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
 
   return (
     <div className="h-screen flex overflow-hidden relative">
-      {/* Header controls (timer + end session) moved into main header for alignment */}
-
       <div className="flex-1 flex overflow-hidden">
         <aside className="w-[35%] flex flex-col border-r border-white/5 bg-slate-900/30">
           <div className="h-64 border-b border-white/5 p-6 flex flex-col relative overflow-hidden">
@@ -599,18 +550,18 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
 
             <div className="flex-1 flex flex-col items-center justify-center">
               <div id="voice-viz" className={`flex items-center gap-1 h-12 mb-4 ${listening ? 'speaking' : ''}`}>
-                <div className="wave-bar" style={{animationDelay: '0.0s'}}></div>
-                <div className="wave-bar" style={{animationDelay: '0.1s'}}></div>
-                <div className="wave-bar" style={{animationDelay: '0.2s'}}></div>
-                <div className="wave-bar" style={{animationDelay: '0.3s'}}></div>
-                <div className="wave-bar" style={{animationDelay: '0.1s'}}></div>
+                <div className="wave-bar" style={{ animationDelay: '0.0s' }}></div>
+                <div className="wave-bar" style={{ animationDelay: '0.1s' }}></div>
+                <div className="wave-bar" style={{ animationDelay: '0.2s' }}></div>
+                <div className="wave-bar" style={{ animationDelay: '0.3s' }}></div>
+                <div className="wave-bar" style={{ animationDelay: '0.1s' }}></div>
               </div>
               <p id="agent-text" className="text-center text-sm text-slate-200 font-medium leading-relaxed">{agentText}</p>
             </div>
 
-              <div className="mt-4 flex gap-2 justify-center">
+            <div className="mt-4 flex gap-2 justify-center">
               <button id="mic-btn" className={`w-10 h-10 rounded-full ${listening ? 'bg-blue-600' : 'bg-slate-700'} hover:bg-blue-500 flex items-center justify-center transition shadow-lg shadow-blue-500/20`} onClick={() => setListening((s) => !s)}>
-                <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+                <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" /><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" /></svg>
               </button>
               <button onClick={simulateUnlock} disabled={unlocked} className={`px-4 py-2 rounded-full border border-white/10 text-xs font-semibold hover:bg-white/5 transition disabled:opacity-50 disabled:cursor-not-allowed`}>I'm Ready to Code</button>
             </div>
@@ -633,13 +584,13 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
                 </div>
               </div>
             )}
-            
+
             {currentQuestion ? (
               <>
                 <h2 className="text-xl font-bold mb-4">{currentQuestion.title}</h2>
                 <div className="prose prose-invert prose-sm text-slate-300">
                   <p>{currentQuestion.description || currentQuestion.prompt}</p>
-                  
+
                   {currentQuestion.examples && Array.isArray(currentQuestion.examples) && currentQuestion.examples.map((ex: any, i: number) => (
                     <div key={i} className="bg-slate-800/50 p-4 rounded-lg border border-white/5 my-4">
                       <p className="font-mono text-xs text-slate-400 mb-1">Example {i + 1}:</p>
@@ -647,8 +598,6 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
                       <p className="font-mono text-sm">Output: {ex.output}</p>
                     </div>
                   ))}
-
-                  {/* Testcases moved to right-side panel */}
 
                   {currentQuestion.constraints && (
                     <>
@@ -667,9 +616,8 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
             )}
           </div>
 
-          {/* Chat Input Area */}
           <div className="p-4 border-t border-white/5 bg-slate-900/50">
-            <form 
+            <form
               onSubmit={(e) => {
                 e.preventDefault();
                 sendMessageToAgent(userInput);
@@ -684,8 +632,8 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
                 className="flex-1 bg-slate-800 border border-white/10 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 disabled={isAgentLoading}
               />
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={isAgentLoading || !userInput.trim()}
                 className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -695,18 +643,17 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
           </div>
         </aside>
 
-
         <main className="flex-1 flex flex-col bg-[#1e1e1e] relative">
           <div className="h-10 bg-[#1e1e1e] border-b border-[#333] flex items-center justify-between pl-4 pr-4 select-none">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer hover:text-white">solution.cpp</div>
             </div>
             <div className="flex items-center gap-3">
-               <select value={language} onChange={(e) => setLanguage(e.target.value)} className="bg-transparent text-xs text-slate-400 focus:outline-none border-none cursor-pointer">
-                  <option>C++ 17</option>
-                  <option>C++ 20</option>
-                  <option>Java</option>
-                  <option>Python 3</option>
+              <select value={language} onChange={(e) => setLanguage(e.target.value)} className="bg-transparent text-xs text-slate-400 focus:outline-none border-none cursor-pointer">
+                <option>C++ 17</option>
+                <option>C++ 20</option>
+                <option>Java</option>
+                <option>Python 3</option>
               </select>
               <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-1 rounded-full border border-white/5">
                 <div className={`w-2 h-2 rounded-full ${listening ? 'bg-green-500 animate-pulse' : 'bg-slate-500'}`}></div>
@@ -721,10 +668,9 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
             </div>
           </div>
 
-            <div className="flex-1 relative pb-[340px]" style={{ minHeight: 0 }}>
+          <div className="flex-1 relative pb-[340px]" style={{ minHeight: 0 }}>
             <div className="absolute inset-0 w-full h-full flex">
               <div style={{ flex: 1, position: 'relative' }} className="editor-area">
-                {/* Monaco Editor */}
                 <Editor
                   height="100%"
                   defaultLanguage="cpp"
@@ -758,270 +704,158 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
               <h3 className="text-lg font-bold text-white mb-2">Editor Locked</h3>
               <p className="text-sm text-slate-400 max-w-xs text-center">Please explain your approach to the AI Agent to unlock the coding environment.</p>
             </div>
-</div>
-            {/* Bottom console panel (draggable/expandable) */}
-           {/* Bottom Panel */}
-<div className="absolute left-0 right-0 bottom-12 bg-[#1e1e1e] border-t border-[#333]">
-
-  {/* Tabs */}
-  <div className="flex items-center gap-6 px-4 py-2 border-b border-[#333] text-sm">
-
-    <button
-      onClick={() => setActiveBottomTab("testcase")}
-      className={`${
-        activeBottomTab === "testcase"
-          ? "text-green-400"
-          : "text-slate-400"
-      }`}
-    >
-      Testcase
-    </button>
-
-    <button
-      onClick={() => setActiveBottomTab("result")}
-      className={`${
-        activeBottomTab === "result"
-          ? "text-green-400"
-          : "text-slate-400"
-      }`}
-    >
-      Test Result
-    </button>
-
-  </div>
-
-  {/* Content */}
-  <div className="p-4 max-h-[300px] overflow-auto">
-{activeBottomTab === "testcase" && (
-
-  <div>
-
-    {/* Case Tabs + Run Buttons */}
-    <div className="flex items-center justify-between mb-4">
-
-      <div className="flex gap-2">
-
-        {testCases.map((_, i) => (
-
-          <button
-            key={i}
-            onClick={() => setCurrentTestIndex(i)}
-            className={`px-3 py-1 text-xs rounded ${
-              currentTestIndex === i
-                ? "bg-slate-700 text-white"
-                : "bg-slate-800 text-slate-400"
-            }`}
-          >
-            Case {i + 1}
-          </button>
-
-
-        ))}
-<button
-  onClick={() => {
-    const next = [...testCases, { input: "", expected: "", custom: true }];
-    setTestCases(next);
-    setCurrentTestIndex(next.length - 1);
-  }}
-  className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
->
-  +
-</button>
-      </div>
-
-      <div className="flex gap-2">
-
-        <button
-          onClick={() => runCase(false)}
-          className="px-3 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
-        >
-          Run Case
-        </button>
-
-        <button
-          onClick={() => runTests(false)}
-          className="px-3 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
-        >
-          Run All
-        </button>
-
-      </div>
-
-    </div>
-
-        {/* Input */}
-        <div className="mb-3">
-
-  <div className="text-xs text-slate-400 mb-1">Input</div>
-
-  {testCases[currentTestIndex]?.custom ? (
-
-    <textarea
-      value={testCases[currentTestIndex]?.input || ""}
-      onChange={(e) => {
-        const next = [...testCases];
-        next[currentTestIndex] = {
-          ...(next[currentTestIndex]),
-          input: e.target.value,
-        };
-        setTestCases(next);
-      }}
-      className="w-full bg-slate-800 p-2 text-xs text-white rounded resize-none"
-      rows={3}
-    />
-
-  ) : (
-
-    <div className="bg-slate-800 p-3 rounded text-sm">
-      {testCases[currentTestIndex]?.input}
-    </div>
-
-  )}
-
-</div>
-
-        {/* Expected */}
-
-        <div>
-
-  <div className="text-xs text-slate-400 mb-1">Expected</div>
-
-  {testCases[currentTestIndex]?.custom ? (
-
-    <textarea
-      value={testCases[currentTestIndex]?.expected || ""}
-      onChange={(e) => {
-        const next = [...testCases];
-        next[currentTestIndex] = {
-          ...(next[currentTestIndex]),
-          expected: e.target.value,
-        };
-        setTestCases(next);
-      }}
-      className="w-full bg-slate-800 p-2 text-xs text-white rounded resize-none"
-      rows={2}
-    />
-
-  ) : (
-
-    <div className="bg-slate-800 p-3 rounded text-sm">
-      {testCases[currentTestIndex]?.expected}
-    </div>
-
-  )}
-
-</div>
-
-      </div>
-
-    )}
-
-    {activeBottomTab === "result" && (
-
-      <div>
-
-        {submissionStatus === "compile" && (
-
-          <div className="text-red-400 font-semibold mb-3">
-            Compile Error
           </div>
 
-        )}
-
-        {submissionStatus === "wrong" && (
-
-          <div className="text-red-400 font-semibold mb-3">
-            Wrong Answer
-          </div>
-
-        )}
-
-        {submissionStatus === "accepted" && (
-
-          <div className="text-green-400 font-semibold mb-3">
-            Accepted
-          </div>
-
-        )}
-
-        <pre className="bg-slate-900 p-3 rounded text-xs whitespace-pre-wrap">
-          {consoleOutput}
-        </pre>
-
-      </div>
-
-    )}
-
-  </div>
-
-</div>
-
-          <style jsx>{`
-            :global(.error-underline) {
-              text-decoration-line: underline;
-              text-decoration-style: solid;
-              text-decoration-color: #ff4d4f;
-              text-decoration-thickness: 2px;
-            }
-            /* Syntax token colors */
-            :global(.tok-keyword) { color: #c792ea; font-weight: 600; }
-            :global(.tok-string) { color: #8fbd5f; }
-            :global(.tok-comment) { color: #6b7280; font-style: italic; }
-            :global(.tok-number) { color: #f78c6c; }
-            :global(.tok-builtin) { color: #4fd1fe; }
-            :global(.tok-ident) { color: #e6edf3; }
-            :global(.tok-punct) { color: #e2e8f0; }
-            /* Ensure pre, textarea, and gutter line up */
-            :global(.editor-area) pre, :global(.editor-area) textarea { line-height: 1.5; font-size: 13px; box-sizing: border-box; }
-            pre { line-height: 1.5; }
-            .gutter { background: rgba(2,6,23,0.6); color: #94a3b8; padding-top: 24px; overflow: auto; display: flex; flex-direction: column; align-items: flex-end; padding-right: 8px; }
-            .gutter-line { line-height: 1.5; height: 1.5em; padding: 0 6px; text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace; }
-            /* Locked overlay that blocks editor until unlocked */
-            :global(.logic-lock-overlay) {
-              position: absolute;
-              inset: 0;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              flex-direction: column;
-              gap: 12px;
-              z-index: 40;
-              background: linear-gradient(180deg, rgba(17,24,39,0.6), rgba(17,24,39,0.6));
-              pointer-events: auto;
-            }
-            :global(.logic-lock-overlay.hidden) { display: none; }
-            :global(.logic-lock-overlay h3) { color: #fff; }
-            :global(.logic-lock-overlay p) { color: #94a3b8; max-width: 36rem; text-align: center; }
-          `}</style>
-
-          {/* Custom input (toggleable) */}
-          {showCustomInput && (
-            <div className="px-4 pb-2" style={{ background: '#1e1e1e', borderTop: '1px solid #333' }}>
-              <div className="text-xs text-slate-400 mb-1">Custom Input (stdin)</div>
-              <textarea
-                value={customInput}
-                onChange={(e) => setCustomInput(e.target.value)}
-                placeholder="Enter input passed to your program (stdin)..."
-                className="w-full bg-slate-800 border border-white/5 rounded p-2 text-xs text-white resize-none"
-                rows={4}
-              />
+          <div className="absolute left-0 right-0 bottom-12 bg-[#1e1e1e] border-t border-[#333]">
+            <div className="flex items-center gap-6 px-4 py-2 border-b border-[#333] text-sm">
+              <button
+                onClick={() => setActiveBottomTab("testcase")}
+                className={`${activeBottomTab === "testcase" ? "text-green-400" : "text-slate-400"}`}
+              >
+                Testcase
+              </button>
+              <button
+                onClick={() => setActiveBottomTab("result")}
+                className={`${activeBottomTab === "result" ? "text-green-400" : "text-slate-400"}`}
+              >
+                Test Result
+              </button>
             </div>
-          )}
+
+            <div className="p-4 max-h-[300px] overflow-auto">
+              {activeBottomTab === "testcase" && (
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex gap-2">
+                      {testCases.map((_, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setCurrentTestIndex(i)}
+                          className={`px-3 py-1 text-xs rounded ${currentTestIndex === i ? "bg-slate-700 text-white" : "bg-slate-800 text-slate-400"}`}
+                        >
+                          Case {i + 1}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => {
+                          const next = [...testCases, { input: "", expected: "", custom: true }];
+                          setTestCases(next);
+                          setCurrentTestIndex(next.length - 1);
+                        }}
+                        className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => runCase(false)}
+                        className="px-3 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
+                      >
+                        Run Case
+                      </button>
+                      <button
+                        onClick={() => runTests(false)}
+                        className="px-3 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600"
+                      >
+                        Run All
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <div className="text-xs text-slate-400 mb-1">Input</div>
+                    {testCases[currentTestIndex]?.custom ? (
+                      <textarea
+                        value={testCases[currentTestIndex]?.input || ""}
+                        onChange={(e) => {
+                          const next = [...testCases];
+                          next[currentTestIndex] = { ...next[currentTestIndex], input: e.target.value };
+                          setTestCases(next);
+                        }}
+                        className="w-full bg-slate-800 p-2 text-xs text-white rounded resize-none"
+                        rows={3}
+                      />
+                    ) : (
+                      <div className="bg-slate-800 p-3 rounded text-sm text-white">
+                        {testCases[currentTestIndex]?.input}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="text-xs text-slate-400 mb-1">Expected</div>
+                    {testCases[currentTestIndex]?.custom ? (
+                      <textarea
+                        value={testCases[currentTestIndex]?.expected || ""}
+                        onChange={(e) => {
+                          const next = [...testCases];
+                          next[currentTestIndex] = { ...next[currentTestIndex], expected: e.target.value };
+                          setTestCases(next);
+                        }}
+                        className="w-full bg-slate-800 p-2 text-xs text-white rounded resize-none"
+                        rows={2}
+                      />
+                    ) : (
+                      <div className="bg-slate-800 p-3 rounded text-sm text-white">
+                        {testCases[currentTestIndex]?.expected}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeBottomTab === "result" && (
+                <div>
+                  {submissionStatus === "compile" && <div className="text-red-400 font-semibold mb-3">Compile Error</div>}
+                  {submissionStatus === "wrong" && <div className="text-red-400 font-semibold mb-3">Wrong Answer</div>}
+                  {submissionStatus === "accepted" && <div className="text-green-400 font-semibold mb-3">Accepted</div>}
+                  <pre className="bg-slate-900 p-3 rounded text-xs whitespace-pre-wrap text-white">
+                    {consoleOutput}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="h-12 bg-[#1e1e1e] border-t border-[#333] flex items-center justify-between px-4 shrink-0">
-
+            <div className="flex items-center gap-3"></div>
             <div className="flex items-center gap-3">
-              {/* <button onClick={() => setConsoleVisible((v) => !v)} className="text-xs text-slate-400 hover:text-white flex items-center gap-2">Console</button>
-              <button onClick={() => setShowCustomInput((s) => !s)} className="text-xs text-slate-400 hover:text-white flex items-center gap-2">Input</button> */}
-            </div>
-            <div className="flex items-center gap-3">
-              {/* <button onClick={runCode} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-300 hover:bg-white/5 border border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">Run Code</button> */}
-              <button onClick={runWithJudge0} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-300 hover:bg-white/5 border border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">Run</button>
-              <button onClick={submitSolution} disabled={isRunning} className="px-4 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-500 transition shadow-lg shadow-green-500/10 disabled:opacity-50 disabled:cursor-not-allowed">Submit</button>
+              <button onClick={runWithJudge0} className="px-4 py-1.5 rounded text-xs font-semibold text-slate-300 hover:bg-white/5 border border-transparent transition">Run</button>
+              <button onClick={submitSolution} className="px-4 py-1.5 rounded text-xs font-semibold bg-green-600 text-white hover:bg-green-500 transition shadow-lg shadow-green-500/10">Submit</button>
             </div>
           </div>
         </main>
       </div>
+
+      <style jsx>{`
+        .wave-bar {
+          width: 3px;
+          height: 100%;
+          background: #3b82f6;
+          border-radius: 2px;
+          animation: dance 1s ease-in-out infinite;
+        }
+        @keyframes dance {
+          0%, 100% { height: 10%; }
+          50% { height: 100%; }
+        }
+        .speaking .wave-bar {
+          animation-duration: 0.5s;
+        }
+        :global(.logic-lock-overlay) {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-direction: column;
+          gap: 12px;
+          z-index: 40;
+          background: rgba(17, 24, 39, 0.8);
+          backdrop-filter: blur(4px);
+        }
+      `}</style>
     </div>
   );
 }

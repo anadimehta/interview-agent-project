@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runCodeInSandbox } from "../../../../src/lib/compilerRunner";
+import { runCodeInSandbox } from "../../../lib/compilerRunner";
 
 // Minimal language mapping — adjust IDs if your Judge0 deployment uses different ones.
 const LANGUAGE_MAP: Record<string, number> = {
