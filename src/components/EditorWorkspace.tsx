@@ -391,11 +391,9 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
     }
 
     setActiveBottomTab("result");
-    const summary = `Tests: ${passedCount}/${results.length} passed`;
+    const summary = passedCount === results.length ? "All cases passed!" : `Passed ${passedCount} out of ${results.length} cases.`;
     const detail = results.map((r, idx) => {
-      if (r.passed) return `#${idx + 1} - PASS`;
-      const got = r.output ?? r.error ?? '';
-      return `#${idx + 1} - FAIL - expected: ${r.expected} got: ${got}`;
+      return `Case ${idx + 1}: ${r.passed ? 'PASS' : 'FAIL'}${!r.passed ? ` (Expected "${r.expected}", Got "${r.output ?? r.error}")` : ''}`;
     }).join("\n");
     setConsoleOutput(`${summary}\n\n${detail}`);
     setConsoleVisible(true);
@@ -448,7 +446,7 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
       while (next.length <= idx) next.push(undefined as any);
       next[idx] = r; 
       setTestResults(next);
-      setConsoleOutput(`${passed ? 'PASS' : 'FAIL'}\n\nExpected: ${tc.expected}\nGot: ${out}`);
+      setConsoleOutput(`${passed ? 'PASS' : 'FAIL'}\n\nInput: ${tc.input}\nExpected: ${tc.expected}\nOutput: ${out}`);
       setConsoleVisible(true);
       setActiveBottomTab("result");
     } catch (e) {
@@ -806,13 +804,34 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
               )}
 
               {activeBottomTab === "result" && (
-                <div>
-                  {submissionStatus === "compile" && <div className="text-red-400 font-semibold mb-3">Compile Error</div>}
-                  {submissionStatus === "wrong" && <div className="text-red-400 font-semibold mb-3">Wrong Answer</div>}
-                  {submissionStatus === "accepted" && <div className="text-green-400 font-semibold mb-3">Accepted</div>}
-                  <pre className="bg-slate-900 p-3 rounded text-xs whitespace-pre-wrap text-white">
-                    {consoleOutput}
-                  </pre>
+                <div className="flex flex-col gap-4">
+                  <div>
+                    {submissionStatus === "compile" && <div className="text-red-400 text-lg font-bold">Compile Error</div>}
+                    {submissionStatus === "wrong" && <div className="text-red-400 text-lg font-bold">Wrong Answer</div>}
+                    {submissionStatus === "accepted" && <div className="text-green-400 text-lg font-bold">Accepted</div>}
+                  </div>
+                  
+                  <div className="flex flex-col gap-2">
+                    {submissionStatus === "compile" ? (
+                      <pre className="bg-slate-900 p-3 rounded text-xs whitespace-pre-wrap text-red-300 border border-red-500/10">
+                        {consoleOutput}
+                      </pre>
+                    ) : testResults.length > 0 ? (
+                      testResults.map((res, i) => (
+                        <div key={i} className="flex items-center gap-3 bg-slate-800/50 p-3 rounded border border-white/5">
+                          <div className={`w-2 h-2 rounded-full ${res.passed ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                          <span className="text-sm font-semibold text-slate-300">Case {i + 1}</span>
+                          <span className={`text-xs font-bold uppercase tracking-wider ${res.passed ? 'text-green-400' : 'text-red-400'}`}>
+                            {res.passed ? 'PASS' : 'FAIL'}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <pre className="bg-slate-900 p-3 rounded text-xs whitespace-pre-wrap text-white border border-white/5">
+                        {consoleOutput}
+                      </pre>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
