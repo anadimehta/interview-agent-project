@@ -855,6 +855,7 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
           background: rgba(17, 24, 39, 0.8);
           backdrop-filter: blur(4px);
         }
+        :global(.logic-lock-overlay.hidden) { display: none; }
       `}</style>
     </div>
   );
