@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
+import Editor, { OnMount } from '@monaco-editor/react';
 import { supabase } from "../lib/supabaseClient";
 
 const ACTIVE_SESSION_STORAGE_KEY = "interview_agent_active_session_v1";
@@ -52,7 +53,7 @@ export default function EditorWorkspace({ company, topic, duration, excludeTopic
   const [agentText, setAgentText] = useState("\"Connecting to session...\"");
   const [listening, setListening] = useState(false); // Default to false for text input initially
   const [editorValue, setEditorValue] = useState(`// Implement your solution here\n`);
-  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<any | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(duration * 60);
   const sessionIdRef = useRef<string | null>(null);
   const startedAtMsRef = useRef<number>(Date.now());
@@ -80,9 +81,7 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
   const [customInput, setCustomInput] = useState<string>("");
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [diagnostics, setDiagnostics] = useState<{ line: number; column?: number; message: string }[]>([]);
-  const preRef = useRef<HTMLElement | null>(null);
-  const gutterRef = useRef<HTMLDivElement | null>(null);
-  const GUTTER_WIDTH = 56;
+  // Monaco handles gutter and rendering
 
   const excludeKey = (excludeTopics ?? []).filter(Boolean).join(",");
   const interviewKey = `${company}__${topic}__${duration}__${excludeKey}`;
@@ -331,7 +330,12 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
     setTimeout(() => {
       setUnlocked(true);
       setAgentText(`Editor unlocked. You have ${duration} minutes to implement the solution.`);
-      editorRef.current?.focus();
+      // Focus Monaco editor when unlocked
+      try {
+        editorRef.current?.focus?.();
+      } catch (e) {
+        // ignore
+      }
     }, 1200);
   }
 
@@ -399,14 +403,28 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
           body: JSON.stringify({ code: editorValue, language, stdin: tc.input }),
         });
         const data = await res.json().catch(() => ({} as any));
+        // If compilation/compile_output present, stop and show it once (LeetCode-like behavior)
+        const compileOutput = data?.compileStderr ?? data?.compile_output ?? data?.compileOutput;
+        const diagnosticsFromResp = data?.errors ?? data?.diagnostics;
+        if (compileOutput || (Array.isArray(diagnosticsFromResp) && diagnosticsFromResp.length > 0)) {
+          // Show compilation error once and abort further test runs
+          const errMsg = compileOutput ?? (Array.isArray(diagnosticsFromResp) ? diagnosticsFromResp.map((d: any) => d.message ?? JSON.stringify(d)).join('\n') : (data?.error ?? `Run failed (${res.status})`));
+          setDiagnostics(Array.isArray(diagnosticsFromResp) ? diagnosticsFromResp : []);
+          setSubmissionStatus("compile");
+          setConsoleOutput(String(errMsg));
+          setConsoleVisible(true);
+          setActiveBottomTab("result");
+          return; // stop running further tests
+        }
+
         if (!res.ok || data?.ok === false) {
-          const err = data?.error ?? data?.compileStderr ?? data?.stderr ?? `Run failed (${res.status})`;
+          const err = data?.error ?? data?.stderr ?? `Run failed (${res.status})`;
           results.push({ input: tc.input, expected: tc.expected, output: undefined, passed: false, error: String(err) });
           setTestResults([...results]);
           continue;
         }
 
-        const out = normalizeOutput(data.stdout ?? data.runStdout ?? data.compileStderr ?? data.stderr ?? "");
+        const out = normalizeOutput(data.stdout ?? data.runStdout ?? data.stderr ?? "");
         const expect = normalizeOutput(tc.expected);
         const passed = out === expect;
         results.push({ input: tc.input, expected: tc.expected, output: out, passed, error: undefined });
@@ -417,22 +435,24 @@ const [submissionStatus, setSubmissionStatus] = useState<"accepted" | "wrong" | 
       }
     }
 
-    const passedCount = results.filter(r => r.passed).length;
+        const passedCount = results.filter(r => r.passed).length;
+        if (passedCount === results.length) {
+          setSubmissionStatus("accepted");
+        } else {
+          setSubmissionStatus("wrong");
+        }
 
-if (results.some(r => r.error)) {
-  setSubmissionStatus("compile");
-} else if (passedCount === results.length) {
-  setSubmissionStatus("accepted");
-} else {
-  setSubmissionStatus("wrong");
-}
+        setActiveBottomTab("result");
 
-setActiveBottomTab("result");
-
-const summary = `Tests: ${passedCount}/${results.length} passed`;
-    const detail = results.map((r, idx) => `#${idx + 1} - ${r.passed ? 'PASS' : 'FAIL'} - expected: ${r.expected} got: ${r.output ?? r.error ?? ''}`).join("\n");
-    setConsoleOutput(`${summary}\n\n${detail}`);
-    setConsoleVisible(true);
+        const summary = `Tests: ${passedCount}/${results.length} passed`;
+        // Show concise PASS/FAIL per test; include expected/got only for failed cases
+        const detail = results.map((r, idx) => {
+          if (r.passed) return `#${idx + 1} - PASS`;
+          const got = r.output ?? r.error ?? '';
+          return `#${idx + 1} - FAIL - expected: ${r.expected} got: ${got}`;
+        }).join("\n");
+        setConsoleOutput(`${summary}\n\n${detail}`);
+        setConsoleVisible(true);
   }
 
   async function runCase(useJudge: boolean) {
@@ -447,12 +467,25 @@ const summary = `Tests: ${passedCount}/${results.length} passed`;
         body: JSON.stringify({ code: editorValue, language, stdin: tc.input }),
       });
       const data = await res.json().catch(() => ({} as any));
+      const compileOutput = data?.compileStderr ?? data?.compile_output ?? data?.compileOutput;
+      const diagnosticsFromResp = data?.errors ?? data?.diagnostics;
+      if (compileOutput || (Array.isArray(diagnosticsFromResp) && diagnosticsFromResp.length > 0)) {
+        // Compilation error: show once
+        const errMsg = compileOutput ?? (Array.isArray(diagnosticsFromResp) ? diagnosticsFromResp.map((d: any) => d.message ?? JSON.stringify(d)).join('\n') : (data?.error ?? `Run failed (${res.status})`));
+        setDiagnostics(Array.isArray(diagnosticsFromResp) ? diagnosticsFromResp : []);
+        setSubmissionStatus("compile");
+        setConsoleOutput(String(errMsg));
+        setConsoleVisible(true);
+        setActiveBottomTab("result");
+        return;
+      }
+
       if (!res.ok || data?.ok === false) {
-        const err = data?.error ?? data?.compileStderr ?? data?.stderr ?? `Run failed (${res.status})`;
+        const err = data?.error ?? data?.stderr ?? `Run failed (${res.status})`;
         const r = { input: tc.input, expected: tc.expected, output: undefined, passed: false, error: String(err) };
         const next = [...testResults];
          while (next.length <= idx) next.push(undefined as any); next[idx] = r; setTestResults(next);
-       
+        
         setConsoleOutput(String(err)); setConsoleVisible(true);
         setActiveBottomTab("result");
         return;
@@ -575,11 +608,11 @@ const summary = `Tests: ${passedCount}/${results.length} passed`;
               <p id="agent-text" className="text-center text-sm text-slate-200 font-medium leading-relaxed">{agentText}</p>
             </div>
 
-            <div className="mt-4 flex gap-2 justify-center">
+              <div className="mt-4 flex gap-2 justify-center">
               <button id="mic-btn" className={`w-10 h-10 rounded-full ${listening ? 'bg-blue-600' : 'bg-slate-700'} hover:bg-blue-500 flex items-center justify-center transition shadow-lg shadow-blue-500/20`} onClick={() => setListening((s) => !s)}>
                 <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
               </button>
-              <button onClick={simulateUnlock} className="px-4 py-2 rounded-full border border-white/10 text-xs font-semibold hover:bg-white/5 transition">I'm Ready to Code</button>
+              <button onClick={simulateUnlock} disabled={unlocked} className={`px-4 py-2 rounded-full border border-white/10 text-xs font-semibold hover:bg-white/5 transition disabled:opacity-50 disabled:cursor-not-allowed`}>I'm Ready to Code</button>
             </div>
           </div>
 
@@ -690,149 +723,30 @@ const summary = `Tests: ${passedCount}/${results.length} passed`;
 
             <div className="flex-1 relative pb-[340px]" style={{ minHeight: 0 }}>
             <div className="absolute inset-0 w-full h-full flex">
-              <div ref={gutterRef} className="gutter" style={{ width: GUTTER_WIDTH }}>
-                {(() => {
-                  const lines = (editorValue || '').split('\n').length;
-                  return Array.from({ length: lines }).map((_, i) => (
-                    <div key={i} className="gutter-line">{i + 1}</div>
-                  ));
-                })()}
-              </div>
-
-              <div style={{ flex: 1, position: 'relative', paddingRight: 0 }}>
-                <pre
-                  ref={preRef as any}
-                  aria-hidden
-                  className="pointer-events-none whitespace-pre-wrap text-white font-mono p-6 m-0 h-full overflow-auto"
-                  style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace', marginLeft: 0 }}
-                  dangerouslySetInnerHTML={{ __html: (() => {
-                    const esc = (s: string) => (s || "").replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-                    const lines = (editorValue || '').split('\n');
-                    const diagByLine: Record<number, { column?: number; message: string }[]> = {};
-                    for (const d of diagnostics || []) {
-                      const ln = Math.max(1, Number(d.line) || 1);
-                      diagByLine[ln] = diagByLine[ln] || [];
-                      diagByLine[ln].push({ column: d.column, message: d.message });
-                    }
-
-                    const keywords = new Set((`abstract as assert break case catch class const continue default delete do else enum export extends false final finally for function goto if implements import in instanceof interface let new null package private protected public return super switch synchronized this throw throws transient true try typeof var void volatile while with yield await def`).split(/\s+/));
-                    const builtins = new Set(["cout","cin","std","printf","println","System","out","err","len","range"]);
-
-                    function tokenizeLine(line: string) {
-                      const tokens: { type: string; text: string; start: number; end: number }[] = [];
-                      let i = 0;
-                      const L = line.length;
-                      while (i < L) {
-                        const ch = line[i];
-                        // Comments
-                        if (ch === '/' && i + 1 < L && line[i+1] === '/') { tokens.push({ type: 'comment', text: line.slice(i), start: i, end: L }); break; }
-                        if (ch === '/' && i + 1 < L && line[i+1] === '*') { const end = line.indexOf('*/', i+2); const e = end >= 0 ? end+2 : L; tokens.push({ type: 'comment', text: line.slice(i, e), start: i, end: e }); i = e; continue; }
-                        if (ch === '#') { tokens.push({ type: 'comment', text: line.slice(i), start: i, end: L }); break; }
-
-                        // Strings
-                        if (ch === '"' || ch === '\'' || ch === '`') {
-                          const quote = ch; let j = i+1; let closed = false;
-                          while (j < L) {
-                            if (line[j] === '\\') { j += 2; continue; }
-                            if (line[j] === quote) { j++; closed = true; break; }
-                            j++;
-                          }
-                          tokens.push({ type: 'string', text: line.slice(i, j), start: i, end: j }); i = j; continue;
-                        }
-
-                        // Numbers
-                        if (/[0-9]/.test(ch)) {
-                          let j = i+1; while (j < L && /[0-9\.xXabcdefABCDEF]/.test(line[j])) j++; tokens.push({ type: 'number', text: line.slice(i, j), start: i, end: j }); i = j; continue;
-                        }
-
-                        // Identifiers/keywords
-                        if (/[A-Za-z_]/.test(ch)) {
-                          let j = i+1; while (j < L && /[A-Za-z0-9_]/.test(line[j])) j++; const txt = line.slice(i, j); const t = keywords.has(txt) ? 'keyword' : (builtins.has(txt) ? 'builtin' : 'ident'); tokens.push({ type: t, text: txt, start: i, end: j }); i = j; continue;
-                        }
-
-                        // whitespace
-                        if (/\s/.test(ch)) { let j = i+1; while (j < L && /\s/.test(line[j])) j++; tokens.push({ type: 'whitespace', text: line.slice(i, j), start: i, end: j }); i = j; continue; }
-
-                        // punctuation
-                        tokens.push({ type: 'punct', text: ch, start: i, end: i+1 }); i++;
-                      }
-                      return tokens;
-                    }
-
-                    return lines.map((lnText, i) => {
-                      const ln = i + 1;
-                      const diags = diagByLine[ln] || [];
-                      const tokens = tokenizeLine(lnText);
-                      // build HTML from tokens
-                      let html = '';
-                      for (let k = 0; k < tokens.length; k++) {
-                        const tk = tokens[k];
-                        const content = esc(tk.text);
-                        let span = content;
-                        if (tk.type === 'string') span = `<span class=\"tok-string\">${content}</span>`;
-                        else if (tk.type === 'comment') span = `<span class=\"tok-comment\">${content}</span>`;
-                        else if (tk.type === 'number') span = `<span class=\"tok-number\">${content}</span>`;
-                        else if (tk.type === 'keyword') span = `<span class=\"tok-keyword\">${content}</span>`;
-                        else if (tk.type === 'builtin') span = `<span class=\"tok-builtin\">${content}</span>`;
-                        else if (tk.type === 'ident') span = `<span class=\"tok-ident\">${content}</span>`;
-                        else if (tk.type === 'punct') span = `<span class=\"tok-punct\">${content}</span>`;
-                        else span = content;
-                        html += span;
-                      }
-
-                      if (diags.length === 0) return `<div>${html || ' '}</div>`;
-
-                      // wrap error tokens
-                      let wrapped = html;
-                      for (const d of diags) {
-                        if (typeof d.column === 'number' && d.column > 0) {
-                          const col = Math.max(1, Math.min(d.column, lnText.length + 1));
-                          const pos = col - 1;
-                          // find token containing pos
-                          const tk = tokens.find(t => t.start <= pos && pos < t.end) || tokens[tokens.length-1];
-                          if (tk) {
-                            const before = esc(lnText.slice(0, tk.start));
-                            const after = esc(lnText.slice(tk.end));
-                            const tokenHtml = (() => {
-                              const raw = esc(tk.text);
-                              if (tk.type === 'string') return `<span class=\"tok-string\">${raw}</span>`;
-                              if (tk.type === 'comment') return `<span class=\"tok-comment\">${raw}</span>`;
-                              if (tk.type === 'number') return `<span class=\"tok-number\">${raw}</span>`;
-                              if (tk.type === 'keyword') return `<span class=\"tok-keyword\">${raw}</span>`;
-                              if (tk.type === 'builtin') return `<span class=\"tok-builtin\">${raw}</span>`;
-                              if (tk.type === 'ident') return `<span class=\"tok-ident\">${raw}</span>`;
-                              if (tk.type === 'punct') return `<span class=\"tok-punct\">${raw}</span>`;
-                              return raw;
-                            })();
-                            const wrappedTok = `<span class=\"error-underline\" title=\"${esc(d.message)}\">${tokenHtml}</span>`;
-                            wrapped = `${esc(lnText.slice(0, tk.start))}${wrappedTok}${esc(lnText.slice(tk.end))}`;
-                          }
-                        } else {
-                          wrapped = `<span class=\"error-underline\" title=\"${esc(diags.map(x => x.message).join('; '))}\">${html || ' '}</span>`;
-                        }
-                      }
-                      return `<div>${wrapped}</div>`;
-                    }).join('');
-                  })() }}
-                />
-
-                <textarea
-                  ref={editorRef}
+              <div style={{ flex: 1, position: 'relative' }} className="editor-area">
+                {/* Monaco Editor */}
+                <Editor
+                  height="100%"
+                  defaultLanguage="cpp"
+                  language={useMemo(() => {
+                    if (language.toLowerCase().includes('c++')) return 'cpp';
+                    if (language.toLowerCase().includes('java')) return 'java';
+                    if (language.toLowerCase().includes('python')) return 'python';
+                    return 'plaintext';
+                  }, [language])}
+                  theme="vs-dark"
                   value={editorValue}
-                  onChange={(e) => setEditorValue(e.target.value)}
-                  onScroll={(e) => {
-                    const target = e.target as HTMLTextAreaElement;
-                    if (preRef.current) {
-                      (preRef.current as HTMLElement).scrollTop = target.scrollTop;
-                      (preRef.current as HTMLElement).scrollLeft = target.scrollLeft;
-                    }
-                    if (gutterRef.current) gutterRef.current.scrollTop = target.scrollTop;
+                  onChange={(val) => setEditorValue(val ?? '')}
+                  options={{
+                    minimap: { enabled: false },
+                    automaticLayout: true,
+                    fontSize: 13,
+                    lineNumbers: 'on',
+                    wordWrap: 'on',
+                    readOnly: !unlocked,
+                    tabSize: 2,
                   }}
-                  spellCheck={false}
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  className={`absolute inset-0 w-full h-full bg-transparent text-white caret-white font-mono p-6 resize-none ${unlocked ? '' : 'opacity-60 pointer-events-none'}`}
-                  style={{ color: 'transparent', caretColor: 'white', whiteSpace: 'pre-wrap', overflow: 'auto' }}
+                  onMount={(editorInstance) => { editorRef.current = editorInstance; }}
                 />
               </div>
             </div>
@@ -1062,6 +976,22 @@ const summary = `Tests: ${passedCount}/${results.length} passed`;
             pre { line-height: 1.5; }
             .gutter { background: rgba(2,6,23,0.6); color: #94a3b8; padding-top: 24px; overflow: auto; display: flex; flex-direction: column; align-items: flex-end; padding-right: 8px; }
             .gutter-line { line-height: 1.5; height: 1.5em; padding: 0 6px; text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace; }
+            /* Locked overlay that blocks editor until unlocked */
+            :global(.logic-lock-overlay) {
+              position: absolute;
+              inset: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex-direction: column;
+              gap: 12px;
+              z-index: 40;
+              background: linear-gradient(180deg, rgba(17,24,39,0.6), rgba(17,24,39,0.6));
+              pointer-events: auto;
+            }
+            :global(.logic-lock-overlay.hidden) { display: none; }
+            :global(.logic-lock-overlay h3) { color: #fff; }
+            :global(.logic-lock-overlay p) { color: #94a3b8; max-width: 36rem; text-align: center; }
           `}</style>
 
           {/* Custom input (toggleable) */}
